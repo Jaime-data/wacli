@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Sync: add `--webhook-events message,receipt,chat_presence` to forward delivery/read receipts and per-chat typing notifications to the webhook. Every payload gains a flat `EventType` discriminator; the default (`message`) keeps the existing payload stream unchanged. Receipts are filtered at the source to `delivered`, `read`, and `played`, with the empty wire value spelled out as `delivered`. Global presence is deliberately not forwarded.
+
+### Changed
+
+- Sync: the full-queue webhook warning now reports the dropped event type and a running drop total, so a lost receipt is as visible as a lost message.
+
 ## 0.15.0 - 2026-07-23
 
 ### Highlights

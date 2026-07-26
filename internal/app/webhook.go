@@ -15,6 +15,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openclaw/wacli/internal/linkpreview"
@@ -33,8 +34,19 @@ var syncWebhookSafeHTTPClient = newSyncWebhookSafeHTTPClient()
 var syncWebhookRequestTimeout = 5 * time.Second
 
 type syncWebhookPayload struct {
+	EventType SyncWebhookEventKind `json:"EventType"`
 	wa.ParsedMessage
 	ChatName string `json:"ChatName,omitempty"`
+}
+
+type syncWebhookReceiptPayload struct {
+	EventType SyncWebhookEventKind `json:"EventType"`
+	syncWebhookReceipt
+}
+
+type syncWebhookChatPresencePayload struct {
+	EventType SyncWebhookEventKind `json:"EventType"`
+	syncWebhookChatPresence
 }
 
 func newSyncWebhookSafeHTTPClient() *http.Client {
@@ -49,25 +61,41 @@ func syncWebhookEnabled(opts SyncOptions) bool {
 	return strings.TrimSpace(opts.WebhookURL) != ""
 }
 
-func (a *App) newSyncWebhookEnqueuer(ctx context.Context, jobs chan<- wa.ParsedMessage) func(wa.ParsedMessage) {
-	return func(pm wa.ParsedMessage) {
-		if strings.TrimSpace(pm.ID) == "" {
+func (a *App) newSyncWebhookEnqueuer(ctx context.Context, jobs chan<- syncWebhookEvent) func(syncWebhookEvent) {
+	var dropped atomic.Int64
+	return func(evt syncWebhookEvent) {
+		if evt.Kind == "" {
+			evt.Kind = SyncWebhookEventMessage
+		}
+		if evt.Kind == SyncWebhookEventMessage && strings.TrimSpace(evt.Message.ID) == "" {
 			return
 		}
 		select {
-		case jobs <- pm:
+		case jobs <- evt:
 		case <-ctx.Done():
 		default:
+			// A dropped message is caught by reconciliation, but a dropped
+			// receipt is a tick that never advances and leaves no trace, so
+			// report the kind and a running total.
+			total := dropped.Add(1)
 			a.emitWarning(
 				"sync_webhook_dropped",
-				fmt.Sprintf("warning: sync webhook queue full; dropping message %s", pm.ID),
-				map[string]any{"message_id": pm.ID},
+				fmt.Sprintf("warning: sync webhook queue full; dropping %s %s (dropped=%d)", evt.Kind, evt.id(), total),
+				map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "dropped": total},
 			)
 		}
 	}
 }
 
-func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <-chan wa.ParsedMessage) func() {
+// newSyncWebhookMessageEnqueuer adapts the event enqueuer to the message-only
+// signature used by the live message path.
+func newSyncWebhookMessageEnqueuer(enqueue func(syncWebhookEvent)) func(wa.ParsedMessage) {
+	return func(pm wa.ParsedMessage) {
+		enqueue(syncWebhookEvent{Kind: SyncWebhookEventMessage, Message: pm})
+	}
+}
+
+func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <-chan syncWebhookEvent) func() {
 	if jobs == nil {
 		return func() {}
 	}
@@ -80,7 +108,7 @@ func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <
 			select {
 			case <-ctx.Done():
 				return
-			case pm, ok := <-jobs:
+			case evt, ok := <-jobs:
 				if !ok {
 					return
 				}
@@ -90,16 +118,16 @@ func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <
 							stack := debug.Stack()
 							a.emitWarning(
 								"sync_webhook_panic",
-								fmt.Sprintf("sync webhook worker panic (recovered) for %s: %v\n%s", pm.ID, r, stack),
-								map[string]any{"message_id": pm.ID, "panic": fmt.Sprint(r), "stack": string(stack)},
+								fmt.Sprintf("sync webhook worker panic (recovered) for %s: %v\n%s", evt.id(), r, stack),
+								map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "panic": fmt.Sprint(r), "stack": string(stack)},
 							)
 						}
 					}()
-					if err := a.postSyncWebhook(ctx, opts, pm); err != nil {
+					if err := a.postSyncWebhookEvent(ctx, opts, evt); err != nil {
 						a.emitWarning(
 							"sync_webhook_failed",
-							fmt.Sprintf("warning: sync webhook failed for message %s: %v", pm.ID, err),
-							map[string]any{"message_id": pm.ID, "error": err.Error()},
+							fmt.Sprintf("warning: sync webhook failed for %s %s: %v", evt.Kind, evt.id(), err),
+							map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "error": err.Error()},
 						)
 					}
 				}()
@@ -113,13 +141,17 @@ func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <
 }
 
 func (a *App) postSyncWebhook(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage) error {
+	return a.postSyncWebhookEvent(ctx, opts, syncWebhookEvent{Kind: SyncWebhookEventMessage, Message: pm})
+}
+
+func (a *App) postSyncWebhookEvent(ctx context.Context, opts SyncOptions, evt syncWebhookEvent) error {
 	webhookURL := strings.TrimSpace(opts.WebhookURL)
 	if webhookURL == "" {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, syncWebhookRequestTimeout)
 	defer cancel()
-	payload, err := json.Marshal(a.newSyncWebhookPayload(ctx, pm))
+	payload, err := json.Marshal(a.newSyncWebhookEventPayload(ctx, evt))
 	if err != nil {
 		return fmt.Errorf("marshal webhook payload: %w", err)
 	}
@@ -143,8 +175,19 @@ func (a *App) postSyncWebhook(ctx context.Context, opts SyncOptions, pm wa.Parse
 	return nil
 }
 
+func (a *App) newSyncWebhookEventPayload(ctx context.Context, evt syncWebhookEvent) any {
+	switch evt.Kind {
+	case SyncWebhookEventReceipt:
+		return syncWebhookReceiptPayload{EventType: SyncWebhookEventReceipt, syncWebhookReceipt: evt.Receipt}
+	case SyncWebhookEventChatPresence:
+		return syncWebhookChatPresencePayload{EventType: SyncWebhookEventChatPresence, syncWebhookChatPresence: evt.Presence}
+	default:
+		return a.newSyncWebhookPayload(ctx, evt.Message)
+	}
+}
+
 func (a *App) newSyncWebhookPayload(ctx context.Context, pm wa.ParsedMessage) syncWebhookPayload {
-	payload := syncWebhookPayload{ParsedMessage: pm}
+	payload := syncWebhookPayload{EventType: SyncWebhookEventMessage, ParsedMessage: pm}
 	chatJID := canonicalJIDString(pm.Chat)
 	if a.wa != nil {
 		chatJID = canonicalJIDString(a.canonicalStoreJID(ctx, pm.Chat))
