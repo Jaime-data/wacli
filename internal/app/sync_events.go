@@ -53,6 +53,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 		enqueueWebhook = func(syncWebhookEvent) {}
 	}
 	enqueueWebhookMessage := newSyncWebhookMessageEnqueuer(enqueueWebhook)
+	if !opts.WebhookEvents.Enabled(SyncWebhookEventMessage) {
+		enqueueWebhookMessage = func(wa.ParsedMessage) {}
+	}
 	return a.wa.AddEventHandler(func(evt interface{}) {
 		if mediaQ != nil {
 			if !mediaQ.beginProducer() {

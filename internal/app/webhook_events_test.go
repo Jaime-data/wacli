@@ -372,6 +372,19 @@ func TestWebhookEventsOptInDeliversAllThreeKinds(t *testing.T) {
 	}
 }
 
+func TestWebhookEventsWithoutMessageStopsForwardingMessages(t *testing.T) {
+	rec := emitWebhookEvents(t, "receipt", func(f *fakeWA) {
+		f.emit(testLiveMessageEvent())
+		f.emit(testReceiptEvent())
+	})
+
+	body := rec.next(t)
+	if !bytes.Contains(body, []byte(`"EventType":"receipt"`)) {
+		t.Fatalf("first payload should be the receipt, got %s", body)
+	}
+	rec.expectSilence(t)
+}
+
 // events.Presence (online / last seen) is deliberately out of scope: only
 // per-chat typing state is forwarded.
 func TestGlobalPresenceIsNeverForwarded(t *testing.T) {

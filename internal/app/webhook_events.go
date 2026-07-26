@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -67,7 +66,6 @@ func syncWebhookEventNames() []string {
 	for _, kind := range syncWebhookEventKinds {
 		names = append(names, string(kind))
 	}
-	sort.Strings(names)
 	return names
 }
 
@@ -90,7 +88,7 @@ type syncWebhookEvent struct {
 }
 
 // id is only used for log lines; receipts carry a batch of message IDs and
-// presence carries none.
+// presence carries none, so it identifies the chat instead.
 func (e syncWebhookEvent) id() string {
 	switch e.Kind {
 	case SyncWebhookEventReceipt:
@@ -100,6 +98,17 @@ func (e syncWebhookEvent) id() string {
 	default:
 		return e.Message.ID
 	}
+}
+
+// logFields identifies the event in a warning. message_id is only set for
+// messages: the other kinds have no single message ID, and publishing a chat
+// JID under that key would mislead machine consumers of the NDJSON events.
+func (e syncWebhookEvent) logFields() map[string]any {
+	fields := map[string]any{"event_type": string(e.Kind), "event_id": e.id()}
+	if e.Kind == SyncWebhookEventMessage {
+		fields["message_id"] = e.Message.ID
+	}
+	return fields
 }
 
 type syncWebhookReceipt struct {

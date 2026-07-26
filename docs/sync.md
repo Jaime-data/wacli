@@ -24,7 +24,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - `--refresh-channels` fetches subscribed WhatsApp Channels live and updates local chat rows.
 - `--webhook URL` posts successfully stored live message events as JSON on a bounded background worker. The payload includes `ChatName` when a locally resolved chat name is available.
 - `--webhook-secret SECRET` signs webhook payloads with `X-Wacli-Signature: sha256=<hmac>`.
-- `--webhook-events LIST` selects which event types are posted, as a comma-separated list of `message`, `receipt`, and `chat_presence`. The default is `message`, which posts exactly what earlier versions posted. `chat_presence` needs `--presence-mode normal` (the default): WhatsApp only sends typing notifications to devices that mark themselves available. See [Webhook payloads](#webhook-payloads).
+- `--webhook-events LIST` selects which event types are posted, as a comma-separated list of `message`, `receipt`, and `chat_presence`. The default is `message`, which posts exactly what earlier versions posted. A list that omits `message` stops message posts, so `--webhook-events receipt` posts receipts only. `chat_presence` needs `--presence-mode normal` (the default): WhatsApp only sends typing notifications to devices that mark themselves available. See [Webhook payloads](#webhook-payloads).
 - Webhook delivery is best-effort: failures, request timeouts, and full-queue drops are logged as warnings and do not stop sync. Retries/backoff are intentionally out of scope for this flag.
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
@@ -59,8 +59,9 @@ except for the added discriminator:
 (`sender`, `retry`, `read-self`, `played-self`, `inactive`, `server-error`, `peer_msg`,
 `hist_sync`) are dropped at the source so they cannot crowd out real messages. The
 `delivered` type is spelled out explicitly, even though WhatsApp sends it as an empty
-string on the wire. `MessageIDs` keeps WhatsApp's batching, and in groups `Sender` is the
-participant the receipt came from:
+string on the wire. `MessageIDs` keeps WhatsApp's batching (one POST per receipt, not per message,
+minus any blank IDs), and in groups `Sender` is the participant the receipt came
+from:
 
 ```json
 {"EventType":"receipt","Chat":"120363000000000000@g.us","Sender":"15551234567@s.whatsapp.net","MessageIDs":["3EB0…"],"Timestamp":"2026-07-25T10:00:01Z","Type":"delivered","IsFromMe":false}

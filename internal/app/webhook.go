@@ -78,10 +78,12 @@ func (a *App) newSyncWebhookEnqueuer(ctx context.Context, jobs chan<- syncWebhoo
 			// receipt is a tick that never advances and leaves no trace, so
 			// report the kind and a running total.
 			total := dropped.Add(1)
+			fields := evt.logFields()
+			fields["dropped"] = total
 			a.emitWarning(
 				"sync_webhook_dropped",
 				fmt.Sprintf("warning: sync webhook queue full; dropping %s %s (dropped=%d)", evt.Kind, evt.id(), total),
-				map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "dropped": total},
+				fields,
 			)
 		}
 	}
@@ -116,18 +118,23 @@ func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <
 					defer func() {
 						if r := recover(); r != nil {
 							stack := debug.Stack()
+							fields := evt.logFields()
+							fields["panic"] = fmt.Sprint(r)
+							fields["stack"] = string(stack)
 							a.emitWarning(
 								"sync_webhook_panic",
 								fmt.Sprintf("sync webhook worker panic (recovered) for %s: %v\n%s", evt.id(), r, stack),
-								map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "panic": fmt.Sprint(r), "stack": string(stack)},
+								fields,
 							)
 						}
 					}()
 					if err := a.postSyncWebhookEvent(ctx, opts, evt); err != nil {
+						fields := evt.logFields()
+						fields["error"] = err.Error()
 						a.emitWarning(
 							"sync_webhook_failed",
 							fmt.Sprintf("warning: sync webhook failed for %s %s: %v", evt.Kind, evt.id(), err),
-							map[string]any{"message_id": evt.id(), "event_type": string(evt.Kind), "error": err.Error()},
+							fields,
 						)
 					}
 				}()
@@ -138,10 +145,6 @@ func (a *App) runSyncWebhookWorker(ctx context.Context, opts SyncOptions, jobs <
 		cancel()
 		wg.Wait()
 	}
-}
-
-func (a *App) postSyncWebhook(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage) error {
-	return a.postSyncWebhookEvent(ctx, opts, syncWebhookEvent{Kind: SyncWebhookEventMessage, Message: pm})
 }
 
 func (a *App) postSyncWebhookEvent(ctx context.Context, opts SyncOptions, evt syncWebhookEvent) error {
