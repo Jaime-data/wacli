@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.15.1 - Unreleased
+## 0.15.100 - 2026-07-26
+
+Fork bridge build: upstream `v0.15.0` plus the post-release commits on `main`
+and the `--webhook-events` patch (upstream PR #315). Patch number 100 cannot
+collide with upstream, which stays in the 0-2 range.
+
+### Added
+
+- Sync: add `--webhook-events message,receipt,chat_presence` to forward delivery/read receipts and per-chat typing notifications to the webhook. Every payload gains a flat `EventType` discriminator; the default (`message`) keeps the existing payload stream unchanged. Receipts are filtered at the source to `delivered`, `read`, and `played`, with the empty wire value spelled out as `delivered`. Global presence is deliberately not forwarded.
+
+### Changed
+
+- Sync: the full-queue webhook warning now reports the dropped event type and a running drop total, so a lost receipt is as visible as a lost message.
 
 ### Chore
 
