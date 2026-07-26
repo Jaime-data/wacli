@@ -5,7 +5,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-export const RELEASE_REPOSITORY = "openclaw/wacli";
+// Fork-only: the bridge build runs the same pipeline under Jaime-data/wacli, so
+// the provenance pin is read from the environment with upstream as the default.
+// Never send this to upstream; it is dropped when the fork is archived.
+export const RELEASE_REPOSITORY = process.env.WACLI_RELEASE_REPOSITORY || "openclaw/wacli";
 export const RELEASE_GO_VERSION = "go1.26.5";
 export const RELEASE_GO_TOOLCHAIN = "go1.26.5";
 export const RELEASE_GOVULNCHECK_VERSION = "v1.5.0";

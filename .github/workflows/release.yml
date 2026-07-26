@@ -143,6 +143,7 @@ jobs:
             HOME="$RUNNER_TEMP/build-home" \
             PATH="$PATH" \
             TMPDIR="$RUNNER_TEMP" \
+            WACLI_RELEASE_REPOSITORY="$GITHUB_REPOSITORY" \
             node trusted/scripts/collect-cross-platform-assets.mjs \
               --source source/dist \
               --output cross-assets \
