@@ -17,6 +17,7 @@ wacli groups description --jid GROUP_JID --text TEXT
 wacli groups announce-only --jid GROUP_JID (--on|--off)
 wacli groups locked --jid GROUP_JID (--on|--off)
 wacli groups leave --jid GROUP_JID
+wacli groups participants list --jid GROUP_JID
 wacli groups participants add --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants remove --jid GROUP_JID --user PHONE_OR_JID [--user ...]
 wacli groups participants promote --jid GROUP_JID --user PHONE_OR_JID [--user ...]
@@ -41,6 +42,8 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - `topic` and `description` both set the WhatsApp group description. Passing `--text ""` clears it.
 - `announce-only --on` makes the group admin-send-only; `--off` restores participant sends.
 - `locked --on` makes group info editable only by admins; `--off` allows member edits again.
+- `participants list` reads the roster from local rows only. Unlike `info`, it never connects and never writes, so it works in read-only mode and against the store of a running `sync --follow` daemon. Freshness therefore depends on the last time that group was refreshed — the follower re-reads the participants each time it persists a group message, and `groups refresh` or `groups info` also update them.
+- `participants list --json` returns `{groupJid, selfJid, participants[{userJid, role, updatedAt}]}`. `selfJid` is this device's own JID, read from the session store, and is `""` when it cannot be determined; the roster includes it, so a consumer counting "everyone else" must subtract it. An empty `participants` array means no roster is known locally, which is not the same as a group with no members.
 - `requests` lists, approves, or rejects pending join requests for groups with join approval enabled.
 - `leave` marks the group left locally after WhatsApp confirms.
 - `prune` only deletes local group/chat/message rows from `wacli.db`. It does not leave WhatsApp groups or delete anything from WhatsApp servers.

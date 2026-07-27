@@ -17,6 +17,7 @@ func newGroupsParticipantsCmd(flags *rootFlags) *cobra.Command {
 		Use:   "participants",
 		Short: "Manage group participants",
 	}
+	cmd.AddCommand(newGroupsParticipantsListCmd(flags))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "add"))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "remove"))
 	cmd.AddCommand(newGroupsParticipantsActionCmd(flags, "promote"))

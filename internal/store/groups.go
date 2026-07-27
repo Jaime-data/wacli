@@ -110,6 +110,42 @@ func (d *DB) ReplaceGroupParticipants(groupJID string, participants []GroupParti
 	return tx.Commit()
 }
 
+// ListGroupParticipants returns the roster the local store holds for a group,
+// without contacting WhatsApp. `sync --follow` refreshes it from GetGroupInfo
+// every time it persists a group message, so a follower's store is the roster a
+// reader wants — and reading it must not need the write lock the daemon holds.
+//
+// An empty slice means "no roster known for this JID", which a caller must be
+// able to tell apart from "the group has no members": callers that count on the
+// roster being a census have to treat the empty case as unknown.
+func (d *DB) ListGroupParticipants(groupJID string) ([]GroupParticipant, error) {
+	groupJID = strings.TrimSpace(groupJID)
+	if groupJID == "" {
+		return nil, fmt.Errorf("group JID is required")
+	}
+	rows, err := d.sql.Query(
+		`SELECT user_jid, COALESCE(role,'member'), updated_at
+		 FROM group_participants WHERE group_jid = ? ORDER BY user_jid`,
+		groupJID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]GroupParticipant, 0, 32)
+	for rows.Next() {
+		p := GroupParticipant{GroupJID: groupJID}
+		var updated int64
+		if err := rows.Scan(&p.UserJID, &p.Role, &updated); err != nil {
+			return nil, err
+		}
+		p.UpdatedAt = fromUnix(updated)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) ListGroups(query string, limit int) ([]Group, error) {
 	if limit <= 0 {
 		limit = 50

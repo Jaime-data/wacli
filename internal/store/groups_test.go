@@ -35,6 +35,69 @@ func TestGroupsUpsertListAndParticipantsReplace(t *testing.T) {
 	}
 }
 
+func TestListGroupParticipantsReadsTheStoredRoster(t *testing.T) {
+	db := openTestDB(t)
+
+	gid := "123@g.us"
+	if err := db.UpsertGroup(gid, "Group", "owner@s.whatsapp.net", time.Now().UTC()); err != nil {
+		t.Fatalf("UpsertGroup: %v", err)
+	}
+	if err := db.ReplaceGroupParticipants(gid, []GroupParticipant{
+		{GroupJID: gid, UserJID: "b@s.whatsapp.net", Role: "admin"},
+		{GroupJID: gid, UserJID: "a@s.whatsapp.net", Role: ""},
+	}); err != nil {
+		t.Fatalf("ReplaceGroupParticipants: %v", err)
+	}
+
+	ps, err := db.ListGroupParticipants(gid)
+	if err != nil {
+		t.Fatalf("ListGroupParticipants: %v", err)
+	}
+	if len(ps) != 2 {
+		t.Fatalf("participants = %+v, want 2", ps)
+	}
+	// Sorted by JID so a consumer comparing two reads sees a stable census.
+	if ps[0].UserJID != "a@s.whatsapp.net" || ps[1].UserJID != "b@s.whatsapp.net" {
+		t.Fatalf("unsorted participants: %+v", ps)
+	}
+	if ps[0].Role != "member" || ps[1].Role != "admin" {
+		t.Fatalf("roles = %q/%q, want member/admin", ps[0].Role, ps[1].Role)
+	}
+	if ps[0].UpdatedAt.IsZero() {
+		t.Fatalf("expected UpdatedAt on %+v", ps[0])
+	}
+
+	// A replace is authoritative: a departed member must not linger in a census
+	// that decides whether "everybody" has read a message.
+	if err := db.ReplaceGroupParticipants(gid, []GroupParticipant{
+		{GroupJID: gid, UserJID: "a@s.whatsapp.net", Role: "member"},
+	}); err != nil {
+		t.Fatalf("ReplaceGroupParticipants (shrink): %v", err)
+	}
+	ps, err = db.ListGroupParticipants(gid)
+	if err != nil {
+		t.Fatalf("ListGroupParticipants after shrink: %v", err)
+	}
+	if len(ps) != 1 || ps[0].UserJID != "a@s.whatsapp.net" {
+		t.Fatalf("participants after shrink = %+v, want only a", ps)
+	}
+}
+
+func TestListGroupParticipantsUnknownGroupIsEmptyNotAnError(t *testing.T) {
+	db := openTestDB(t)
+
+	ps, err := db.ListGroupParticipants("nope@g.us")
+	if err != nil {
+		t.Fatalf("ListGroupParticipants: %v", err)
+	}
+	if len(ps) != 0 {
+		t.Fatalf("participants = %+v, want none", ps)
+	}
+	if _, err := db.ListGroupParticipants("  "); err == nil {
+		t.Fatal("expected an error for a blank JID")
+	}
+}
+
 func TestGroupsUpsertHierarchy(t *testing.T) {
 	db := openTestDB(t)
 
