@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.102 - 2026-07-28
+
+Fork bridge build: `0.15.101` plus the second name a linked device answers to.
+
+### Added
+
+- Groups: `groups participants list --json` now also reports `selfLid`, the linked device's LID, beside `selfJid`. A roster lists its members by LID, and a LID shares no digits with the phone JID, so a consumer holding only `selfJid` recognises nobody in the roster and leaves the device in its own census — which then never completes. Both identities are normalised without the device suffix. `selfLid` is empty against a session store written before whatsmeow grew a `lid` column, which reads exactly as it does today.
+
 ## 0.15.101 - 2026-07-28
 
 Fork bridge build: `0.15.100` plus a read-only way to read a group's roster.
