@@ -18,9 +18,15 @@ import (
 // first, and making each of them rediscover it from somewhere else is how they
 // end up off by one — a census that is short or long by one member is worse than
 // no census, because it looks authoritative.
+//
+// `selfLid` travels for the same reason, and is the one that usually does the
+// work: a roster lists its members by LID, which shares no digits with the phone
+// JID, so a consumer holding only `selfJid` matches nobody and leaves the owner
+// in the census. Empty when the store predates whatsmeow's `lid` column.
 type groupsParticipantsListPayload struct {
 	GroupJID     string                           `json:"groupJid"`
 	SelfJID      string                           `json:"selfJid"`
+	SelfLID      string                           `json:"selfLid"`
 	Participants []groupsParticipantsListEntryDTO `json:"participants"`
 }
 
@@ -71,10 +77,11 @@ func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
 			// no readable device row still answers the question that was asked. The
 			// empty string is the honest report of "unknown", which a consumer can
 			// act on; refusing the whole command would hide the roster too.
-			var selfJID string
+			var selfJID, selfLID string
 			if storeDir, err := resolveStoreDir(flags); err == nil {
-				if _, linkedJID, err := readOnlyAuthStatus(storeDir); err == nil {
+				if _, linkedJID, linkedLID, err := readOnlyAuthIdentity(storeDir); err == nil {
 					selfJID = linkedJID
+					selfLID = linkedLID
 				}
 			}
 
@@ -82,6 +89,7 @@ func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
 				payload := groupsParticipantsListPayload{
 					GroupJID:     gjid.String(),
 					SelfJID:      selfJID,
+					SelfLID:      selfLID,
 					Participants: make([]groupsParticipantsListEntryDTO, 0, len(ps)),
 				}
 				for _, p := range ps {
@@ -98,7 +106,7 @@ func newGroupsParticipantsListCmd(flags *rootFlags) *cobra.Command {
 			fmt.Fprintln(w, "USER\tROLE\tSELF")
 			for _, p := range ps {
 				self := "-"
-				if selfJID != "" && p.UserJID == selfJID {
+				if (selfJID != "" && p.UserJID == selfJID) || (selfLID != "" && p.UserJID == selfLID) {
 					self = "yes"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", p.UserJID, p.Role, self)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,43 @@ import (
 
 	"github.com/openclaw/wacli/internal/store"
 )
+
+// seedLinkedDevice writes the whatsmeow device row a linked session would have.
+func seedLinkedDevice(t *testing.T, storeDir, jid, lid string) {
+	t.Helper()
+	openSessionDB(t, storeDir, func(db *sql.DB) {
+		if _, err := db.Exec(`CREATE TABLE whatsmeow_device (jid TEXT, lid TEXT)`); err != nil {
+			t.Fatalf("Create table: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO whatsmeow_device (jid, lid) VALUES (?, ?)`, jid, lid); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+	})
+}
+
+// seedLegacyLinkedDevice writes the same row as a whatsmeow old enough to have
+// no `lid` column at all — a store shape this command has to survive.
+func seedLegacyLinkedDevice(t *testing.T, storeDir, jid string) {
+	t.Helper()
+	openSessionDB(t, storeDir, func(db *sql.DB) {
+		if _, err := db.Exec(`CREATE TABLE whatsmeow_device (jid TEXT)`); err != nil {
+			t.Fatalf("Create table: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO whatsmeow_device (jid) VALUES (?)`, jid); err != nil {
+			t.Fatalf("Insert: %v", err)
+		}
+	})
+}
+
+func openSessionDB(t *testing.T, storeDir string, seed func(*sql.DB)) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", filepath.Join(storeDir, "session.db"))
+	if err != nil {
+		t.Fatalf("Open session db: %v", err)
+	}
+	defer db.Close()
+	seed(db)
+}
 
 func seedRosterStore(t *testing.T) string {
 	t.Helper()
@@ -105,6 +143,42 @@ func TestGroupsParticipantsListReportsRosterAndRoles(t *testing.T) {
 	}
 	if payload.Participants[1].UpdatedAt == "" {
 		t.Fatalf("expected updatedAt on %+v", payload.Participants[1])
+	}
+}
+
+// The identity a roster is actually written in. Without it the consumer cannot
+// find the owner among participants that share no digits with the phone JID, so
+// it keeps them in the census and the group never reaches "everyone has read".
+func TestGroupsParticipantsListReportsBothSelfIdentities(t *testing.T) {
+	storeDir := seedRosterStore(t)
+	seedLinkedDevice(t, storeDir, "34600111222:23@s.whatsapp.net", "226822138650736:5@lid")
+
+	payload := runRosterList(t, storeDir, "--jid", "120363000000000001@g.us")
+
+	// Both arrive without the device suffix: it is not part of the identity, and
+	// a consumer comparing whole strings would miss the owner because of it.
+	if payload.SelfJID != "34600111222@s.whatsapp.net" {
+		t.Fatalf("selfJid = %q", payload.SelfJID)
+	}
+	if payload.SelfLID != "226822138650736@lid" {
+		t.Fatalf("selfLid = %q", payload.SelfLID)
+	}
+}
+
+// A store an older whatsmeow wrote has no `lid` column. Reporting the phone JID
+// and an empty LID is strictly better than failing the read: the roster is still
+// the answer to the question that was asked.
+func TestGroupsParticipantsListSurvivesAStoreWithoutTheLIDColumn(t *testing.T) {
+	storeDir := seedRosterStore(t)
+	seedLegacyLinkedDevice(t, storeDir, "34600111222@s.whatsapp.net")
+
+	payload := runRosterList(t, storeDir, "--jid", "120363000000000001@g.us")
+
+	if payload.SelfJID != "34600111222@s.whatsapp.net" || payload.SelfLID != "" {
+		t.Fatalf("self identities = %q / %q", payload.SelfJID, payload.SelfLID)
+	}
+	if len(payload.Participants) != 2 {
+		t.Fatalf("participants = %+v, want the roster regardless", payload.Participants)
 	}
 }
 
