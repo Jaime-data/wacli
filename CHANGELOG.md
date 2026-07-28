@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.101 - 2026-07-28
+
+Fork bridge build: `0.15.100` plus a read-only way to read a group's roster.
+
+### Added
+
+- Groups: add `groups participants list --jid GROUP_JID`, which projects the roster from the local store. Unlike `groups info`, it never connects and never writes, so it works in read-only mode and against the store of a running `sync --follow` daemon instead of competing with it for the write lock. The `--json` payload is `{groupJid, selfJid, participants[{userJid, role, updatedAt}]}`; `selfJid` is this device's own JID (read with the same read-only query `auth status` uses, empty when it cannot be determined) so a consumer counting "everyone else" can subtract it. An empty `participants` array means no roster is known locally, which is not the same as a group with no members.
+
 ## 0.15.100 - 2026-07-26
 
 Fork bridge build: upstream `v0.15.0` plus the post-release commits on `main`
